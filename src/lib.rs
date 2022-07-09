@@ -13,6 +13,14 @@ pub struct SuccTree
 
 impl SuccTree
 {
+    /// Create a new tree with `size` items
+    /// 
+    /// # Example
+    /// ```
+    /// # use succtree::SuccTree;
+    /// let mut tree = SuccTree::new(1000000);      // n = 1000000, k = usize (u64)
+    /// tree.insert(5);
+    /// ```
     pub fn new(size: usize) -> SuccTree
     {
         let block_size_f64 = BLOCK_SIZE_BYTES as f64;
@@ -27,13 +35,14 @@ impl SuccTree
         SuccTree {  tree }
     }
 
+    /// Set a bit at `item` position
     pub fn insert(&mut self, mut item: usize)
     {
         for layer in 0..=(self.tree.len() - 2)
         {
             // set the bit
             self.tree[layer][item / BLOCK_SIZE_BYTES] |= 1 << item % BLOCK_SIZE_BYTES;
-            item = ((item as f64) / BLOCK_SIZE_BYTES as f64).floor() as usize;
+            item = SuccTree::move_up_layer(item);
             if self.is_parent_set(layer + 1, item)
             {
                 break;
@@ -41,6 +50,7 @@ impl SuccTree
         }
     }
 
+    /// Unset a bit at `item` position
     pub fn delete(&mut self, mut item: usize)
     {
         for layer in 0..=(self.tree.len() - 2)
@@ -51,7 +61,7 @@ impl SuccTree
             {
                 break;
             }
-            item = ((item as f64) / BLOCK_SIZE_BYTES as f64).floor() as usize;
+            item = SuccTree::move_up_layer(item);
         }
     }
 
@@ -60,34 +70,47 @@ impl SuccTree
     pub fn successor(&self, mut item: usize) -> Option<usize>
     {
         let mut layer = 0;
-        let mut x = self.greater_sibling_in_block(layer, item);
-        if x != 0
+        let mut next_sibling = self.greater_sibling_in_block(layer, item);
+        if next_sibling != 0
         {
-            return Some(x);
+            return Some(next_sibling);
         }
-        while x == 0 && layer < self.tree.len() - 1
+        while next_sibling == 0 && layer < self.tree.len() - 1
         {
-            item = SuccTree::move_up(item);
+            item = SuccTree::move_up_layer(item);
             layer += 1;
-            x = self.greater_sibling_in_block(layer, item);
+            next_sibling = self.greater_sibling_in_block(layer, item);
         }
-        if x == 0
+        if next_sibling == 0
         {
             return None;
         }
         while layer > 0 
         {
-            item = SuccTree::move_down(x);
+            item = SuccTree::move_down(next_sibling);
             layer -= 1;
-            x = item + self.tree[layer][item / BLOCK_SIZE_BYTES].trailing_zeros() as usize;
+            next_sibling = self.first_item_set_in_block(layer, item);
         }
-        Some(x)
+        Some(next_sibling)
     }
 
+
+    /// Returns the range of siblings with lower inclusive and upper exclusive
+    /// 
+    /// # Example
+    /// ```
+    /// # use succtree::SuccTree;
+    /// let mut tree = SuccTree::new(64);
+    /// for i in 0..64
+    /// {
+    ///    tree.insert(i);
+    /// }
+    /// assert_eq!(vec![5, 6, 7, 8, 9], tree.rquery(5, 10));
+    /// ```
     pub fn rquery(&self, mut lower: usize, upper: usize) -> Vec<usize>
     {
         let mut result = Vec::new();
-        if (self.tree[0][lower] & 1) == 1
+        if (self.tree[0][lower / BLOCK_SIZE_BYTES] & 1) == 1
         {
             result.push(lower);
         }
@@ -102,6 +125,7 @@ impl SuccTree
         }
         result
     }
+
 
     pub fn is_empty(&self) -> bool
     {
@@ -120,6 +144,13 @@ impl SuccTree
         }
     }
 
+    /// Get the first set bit in a block
+    fn first_item_set_in_block(&self, layer: usize, block: usize) -> usize
+    {
+        block + self.tree[layer][block / BLOCK_SIZE_BYTES].trailing_zeros() as usize
+    }
+
+    /// Get the next set bit in a block or return 0
     fn greater_sibling_in_block(&self, layer: usize, item: usize) -> usize
     {
         let mut value = self.tree[layer][item / BLOCK_SIZE_BYTES];
@@ -133,20 +164,23 @@ impl SuccTree
         {
             return 0;
         }
+        // Go to the first index of a block and add trailing zeros
         ((item / BLOCK_SIZE_BYTES) * BLOCK_SIZE_BYTES) + value.trailing_zeros() as usize
     } 
 
+    /// In an items block, is there any other bit set
     fn is_any_sibling_set(&self, layer: usize, item: usize) -> bool
     {
         self.tree[layer][item / BLOCK_SIZE_BYTES] != 0
     }
 
+    /// Is the parent of the current block set
     fn is_parent_set(&self, layer: usize, item: usize) -> bool
     {
         self.tree[layer][item / BLOCK_SIZE_BYTES] & 1 << item % BLOCK_SIZE_BYTES != 0
     }
 
-    fn move_up(item: usize) -> usize
+    fn move_up_layer(item: usize) -> usize
     {
         item / BLOCK_SIZE_BYTES
     }
@@ -165,11 +199,11 @@ mod tests {
     #[test]
     fn test_move_up()
     {
-        assert_eq!(0, SuccTree::move_up(10));
-        assert_eq!(1, SuccTree::move_up(64));
-        assert_eq!(1, SuccTree::move_up(127));
-        assert_eq!(2, SuccTree::move_up(128));
-        assert_eq!(3, SuccTree::move_up(192));
+        assert_eq!(0, SuccTree::move_up_layer(10));
+        assert_eq!(1, SuccTree::move_up_layer(64));
+        assert_eq!(1, SuccTree::move_up_layer(127));
+        assert_eq!(2, SuccTree::move_up_layer(128));
+        assert_eq!(3, SuccTree::move_up_layer(192));
     }
 
     #[test]
@@ -262,12 +296,10 @@ mod tests {
     #[test]
     fn test_insert()
     {
-        let mut tree = SuccTree::new(1000000);
+        let mut tree = SuccTree::new(100);
         tree.insert(0);
         assert_eq!(1, tree.tree[0][0]);
         assert_eq!(1, tree.tree[1][0]);
-        assert_eq!(1, tree.tree[2][0]);
-        assert_eq!(1, tree.tree[3][0]);
         tree.insert(1);
         assert_eq!(3, tree.tree[0][0]);
         tree.insert(1);
